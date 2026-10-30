@@ -1,3 +1,1 @@
-# my_emacs
-# my_emacs
-# my_emacs
+# 只是一个emacs的配置而已。
