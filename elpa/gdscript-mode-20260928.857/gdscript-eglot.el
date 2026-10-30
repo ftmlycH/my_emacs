@@ -1,0 +1,83 @@
+;;; gdscript-eglot.el --- Integration with Eglot  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2023-2026 GDQuest and contributors
+
+;; Author: Ruijie Yu <ruijie@netyu.xyz>
+;; Maintainer: Jen-Chieh Shen <jcs090218@gmail.com>
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+;;
+;; Handles the configuraiton of Eglot.
+;; This supports `gdscript-mode' using `eglot'.
+;;
+
+;;; Code:
+
+(require 'gdscript-godot)
+(require 'gdscript-utils)
+
+;;;###autoload
+(defgroup gdscript-eglot nil
+  "Configurations in gdscript related to `eglot'."
+  :group 'gdscript)
+
+;;;###autoload
+(defcustom gdscript-eglot-default-lsp-port 6005
+  "The default port for eglot to connect when extraction fails."
+  :type 'integer
+  :group 'gdscript-eglot)
+
+
+
+(defun gdscript-eglot--extract-port (editor-settings-file)
+  "Extract LSP port from Godot EDITOR-SETTINGS-FILE.
+If extraction fails, return `gdscript-eglot-default-port'.
+NOTE: remote_port value only presents if it has been modified from the default value,
+So this extract shall fail by default."
+  (or
+   (when (file-exists-p editor-settings-file)
+     (with-temp-buffer
+       (insert-file-contents editor-settings-file)
+       (when (re-search-forward
+              (rx "network/language_server/remote_port"
+                  (* space) ?= (* space)
+                  (group (+ digit)))
+              nil t)
+         (string-to-number (match-string 1)))))
+   gdscript-eglot-default-lsp-port))
+
+;;;###autoload
+(defun gdscript-eglot-contact (_interactive)
+  "Attempt to help `eglot' contact the running gdscript LSP.
+Returns a list (HOST PORT) if successful, nil otherwise.  See the
+last definition of CONTACT in `eglot-server-programs' for
+definitions of HOST, PORT, and INTERACTIVE.
+
+For more context, see
+https://lists.gnu.org/archive/html/bug-gnu-emacs/2023-04/msg01070.html."
+  (save-excursion
+    (let* ((config-dir (gdscript-godot--get-config-dir))
+           (settings-file (file-name-concat
+                           config-dir
+                           (format "editor_settings-%s.tres"
+                                   (gdscript-util--get-godot-project-version)))))
+      (when-let* ((port (gdscript-eglot--extract-port settings-file)))
+        (list "localhost" port)))))
+
+(provide 'gdscript-eglot)
+;;; gdscript-eglot.el ends here.

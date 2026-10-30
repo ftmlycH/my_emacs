@@ -1,0 +1,260 @@
+;;; gdscript-mode.el --- Major mode for Godot's GDScript language  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2020-2026 GDQuest and contributors
+
+;; Author: Nathan Lovato <nathan@gdquest.com>
+;;         Fabián E. Gallina <fgallina@gnu.org>
+;; Maintainer: Jen-Chieh Shen <jcs090218@gmail.com>
+;; URL: https://github.com/godotengine/emacs-gdscript-mode/
+;; Package-Version: 20260928.857
+;; Package-Revision: fc7b7ece95da
+;; Package-Requires: ((emacs "29.1"))
+;; Created: Jan 2020
+;; Keywords: languages
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; Adds support for the GDScript programming language from the Godot game
+;; engine.  This is a domain-specific language dedicated to game programming.
+
+;;; Code:
+
+(require 'gdscript-customization)
+(require 'gdscript-docs)
+(require 'gdscript-syntax)
+(require 'gdscript-indent-and-nav)
+(require 'gdscript-imenu)
+(require 'gdscript-fill-paragraph)
+(require 'gdscript-completion)
+(require 'gdscript-format)
+(require 'gdscript-rx)
+(require 'gdscript-godot)
+(require 'gdscript-hydra)
+(require 'gdscript-debug)
+(require 'gdscript-eglot)
+(require 'gdscript-snippet)
+
+(when (version< "29" emacs-version)
+  (require 'gdscript-ts-mode))
+
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.gd\\'" . gdscript-mode))
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.tscn\\'" . conf-toml-mode))
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.tres\\'" . conf-toml-mode))
+
+;;;###autoload
+(with-eval-after-load 'eglot
+  (defvar eglot-server-programs)
+  (unless (equal (alist-get 'gdscript-mode eglot-server-programs)
+                 #'gdscript-eglot-contact)
+    (push (cons 'gdscript-mode #'gdscript-eglot-contact)
+          eglot-server-programs)))
+
+(defvar-keymap gdscript-mode-map
+  :doc "Keymap for `gdscript-mode'."
+  "<remap> <backward-sentence>" 'gdscript-nav-backward-block
+  "<remap> <forward-sentence>" 'gdscript-nav-forward-block
+  "<remap> <backward-up-list>" 'gdscript-nav-backward-up-list
+  "<remap> <mark-defun>" 'gdscript-mark-defun
+  "C-c C-j" 'imenu
+  ;; Indent specific
+  "<backspace>" 'gdscript-indent-dedent-line-backspace
+  "<backtab>" 'gdscript-indent-dedent-line
+  ;; Insertion.
+  "C-c <tab>" 'gdscript-snippet-menu
+  "C-c C-i" 'gdscript-completion-insert-file-path-at-point
+  ;; Formatting.
+  "C-c C-f r" 'gdscript-format-region
+  "C-c C-f b" 'gdscript-format-buffer
+  ;; Run in Godot.
+  "C-c C-r p" 'gdscript-godot-open-project-in-editor
+  "C-c C-r r" 'gdscript-godot-run-project
+  "<f5>" 'gdscript-godot-run-project
+  "C-c C-r d" 'gdscript-godot-run-project-debug
+  "C-c C-r s" 'gdscript-godot-run-current-scene
+  "<f6>" 'gdscript-godot-run-current-scene
+  "C-c C-r q" 'gdscript-godot-run-current-scene-debug
+  "C-c C-r e" 'gdscript-godot-edit-current-scene
+  "C-c C-r x" 'gdscript-godot-run-current-script
+  ;; Docs.
+  "C-c C-b a" 'gdscript-docs-browse-api
+  "C-c C-b o" 'gdscript-docs-browse-symbol-at-point
+  "C-c C-b s" 'gdscript-docs-online-search-api
+  ;; Hydra
+  "C-c r" 'gdscript-hydra-show
+  ;; Debugger
+  "C-c C-d C-d s" 'gdscript-debug-display-stack-frame-vars-buffer
+  "C-c C-d C-d d" 'gdscript-debug-display-stack-dump-buffer
+  "C-c C-d C-d b" 'gdscript-debug-display-breakpoint-buffer
+  "C-c C-d C-d i" 'gdscript-debug-display-inspector-buffer
+  "<f9>" 'gdscript-debug-toggle-breakpoint
+  "C-c C-d q" 'gdscript-debug-make-server
+  "C-c C-d n" 'gdscript-debug-next
+  "C-c C-d c" 'gdscript-debug-continue
+  "<f7>" 'gdscript-debug-continue
+  "C-c C-d s" 'gdscript-debug-step
+  ;; Debugger Hydra
+  "C-c C-n" 'gdscript-debug-hydra)
+
+(easy-menu-define gdscript-mode-menu gdscript-mode-map
+  "Menu for GDScript mode."
+  '("GDScript"
+    ("Script"
+     ["Format all" gdscript-format-buffer
+      :active (executable-find gdscript-gdformat-executable)
+      :help "Format the buffer using GDFormat, if installed"]
+     ["Format region" gdscript-format-region
+      :active (executable-find gdscript-gdformat-executable)
+      :help "Format the selected region using GDFormat, if installed"])
+    ("Scene"
+     ["Open" gdscript-godot-edit-current-scene
+      :help "Open the current scene in the Godot editor"]
+     ["Run current" gdscript-godot-run-current-scene
+      :help "Run the current scene"])
+    ("Project"
+     ["Open" gdscript-godot-open-project-in-editor
+      :help "Open the project in the Godot editor"]
+     ["Run" gdscript-godot-run-project
+      :help "Run the project's main scene"])
+    ("Help"
+     ["Online documentation" (gdscript-docs-browse-api t)
+      :help "Browse Godot Docs, online"]
+     ["Local documentation" gdscript-docs-browse-api
+      :active (not (equal "" gdscript-docs-local-path))
+      :help "Browse local copy of Godot Docs, if it exists"])))
+
+(defun gdscript-hideshow-forward-sexp-function (_arg)
+  "Gdscript specific `forward-sexp' function for function `hs-minor-mode'.
+Argument ARG is ignored."
+  (gdscript-nav-end-of-defun)
+  (unless (gdscript-info-current-line-empty-p)
+    (backward-char)))
+
+(defun gdscript-electric-pair-string-delimiter ()
+  "GDScript-specific string delimiter detection for `electric-pair-mode'.
+Return a doubled string character for `electric-pair-mode', if
+the last command event was a string delimiter."
+  (when (and electric-pair-mode
+             (memq last-command-event
+                   '(?\" ?\') )
+             (let ((count 0))
+               (while (eq (char-before (- (point)
+                                          count))
+                          last-command-event)
+                 (cl-incf count))
+               (= count 3))
+             (eq (char-after) last-command-event))
+    (save-excursion
+      (insert (make-string 2 last-command-event)))))
+
+(defun gdscript-mark-defun ()
+  "GDScript-specific version of `mark-defun'.
+
+Put mark at end of this defun, point at beginning.
+The defun marked is the one that contains point or follows point.
+
+If the mark is active, it marks the next defun after the one
+already marked."
+  (interactive)
+  (if (use-region-p)
+      (gdscript-nav-forward-defun)
+    (save-excursion
+      (gdscript-nav-backward-defun)
+      (set-mark (point))))
+  (gdscript-nav-end-of-defun))
+
+;;;###autoload
+(define-derived-mode gdscript-mode prog-mode "GDScript"
+  "Major mode for editing Godot GDScript files."
+  (setq-local tab-width gdscript-tab-width)
+  (setq-local indent-tabs-mode gdscript-use-tab-indents)
+
+  (set-syntax-table gdscript-mode-syntax-table)
+  (modify-syntax-entry ?\# "\<" gdscript-mode-syntax-table)
+  (modify-syntax-entry ?\n ">" gdscript-mode-syntax-table)
+
+  (setq-local comment-start "# ")
+  (setq-local comment-start-skip "#+\\s-*")
+  (setq-local comment-end "")
+
+  (setq-local parse-sexp-lookup-properties t)
+  (setq-local parse-sexp-ignore-comments t)
+  (setq-local forward-sexp-function
+              'gdscript-nav-forward-sexp)
+
+  (setq-local font-lock-defaults
+              '(gdscript-font-lock))
+
+  (setq-local syntax-propertize-function
+              gdscript-syntax-propertize-function)
+
+  (setq-local indent-line-function
+              #'gdscript-indent-line-function)
+  (setq-local indent-region-function #'gdscript-indent-region)
+
+  ;; because indentation is not redundant, we cannot safely reindent code.
+  (setq-local electric-indent-inhibit t)
+  (setq-local electric-indent-chars
+              (cons ?: electric-indent-chars))
+
+  ;; add """ ... """ pairing to electric-pair-mode.
+  (add-hook 'post-self-insert-hook
+            #'gdscript-electric-pair-string-delimiter 'append t)
+
+  (setq-local paragraph-start "\\s-*$")
+  (setq-local fill-paragraph-function
+              #'gdscript-fill-paragraph)
+  (setq-local normal-auto-fill-function #'gdscript-fill-paragraph-do-auto-fill)
+
+  (setq-local beginning-of-defun-function
+              #'gdscript-nav-beginning-of-defun)
+  (setq-local end-of-defun-function
+              #'gdscript-nav-end-of-defun)
+
+  (add-hook 'completion-at-point-functions
+            #'gdscript-completion-at-point nil 'local)
+
+  (add-hook 'post-self-insert-hook
+            #'gdscript-indent-post-self-insert-function 'append 'local)
+
+  (setq-local imenu-create-index-function
+              #'gdscript-imenu-create-index)
+
+  (setq-local add-log-current-defun-function
+              #'gdscript-info-current-defun)
+
+  (add-hook 'which-func-functions #'gdscript-info-current-defun nil t)
+
+  (setq-local hs-special-modes-alist ''(gdscript-mode
+                                        "\\s-*\\_<\\(?:func\\|class\\)\\_>"
+                                        ;; use the empty string as end regexp so it doesn't default to
+                                        ;; "\\s)".  this way parens at end of defun are properly hidden.
+                                        ""
+                                        "#"
+                                        gdscript-hideshow-forward-sexp-function
+                                        nil))
+
+  (setq-local outline-regexp
+              (gdscript-rx (* space) block-start))
+  (setq-local outline-level
+              #'(lambda ()
+                  "`outline-level' function for gdscript mode."
+                  (1+ (/ (current-indentation) gdscript-indent-offset)))))
+
+(provide 'gdscript-mode)
+;;; gdscript-mode.el ends here

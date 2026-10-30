@@ -1,0 +1,33 @@
+;;; -*- coding: utf-8; mode: lisp-data -*-
+(("/home/ftmlyc_files/projects/lftcli/src/lftcli/client.py" . 40507)
+ ("/home/ftmlyc_files/projects/lftcli/src/lftcli/main.py" . 49)
+ ("/home/ftmlyc_files/test.txt" . 71)
+ ("/home/ftmlyc_files/projects/lftcli/src/lftcli/"
+  (dired-filename . "/home/ftmlyc_files/projects/lftcli/src/lftcli/main.py"))
+ ("/home/ftmlyc_files/projects/lftcli/src/"
+  (dired-filename . "/home/ftmlyc_files/projects/lftcli/src/lftcli"))
+ ("/home/ftmlyc_files/projects/lftcli/"
+  (dired-filename . "/home/ftmlyc_files/projects/lftcli/src"))
+ ("/home/ftmlyc_files/projects/"
+  (dired-filename . "/home/ftmlyc_files/projects/lftcli"))
+ ("/home/ftmlyc_files/" (dired-filename . "/home/ftmlyc_files/projects"))
+ ("/home/" (dired-filename . "/home/ftmlyc_files")) ("/var/mail/ftmlych" . 520)
+ ("/home/ftmlych/.spectrwm.conf" . 461)
+ ("/home/ftmlyc_files/projects/study/cpp/cpp_1.cpp" . 105)
+ ("/home/ftmlyc_files/projects/study/python/"
+  (dired-filename . "/home/ftmlyc_files/projects/study/python/fbnq.py"))
+ ("/home/ftmlyc_files/projects/study/python/fbnq.py" . 80)
+ ("/home/ftmlyc_files/projects/study/"
+  (dired-filename . "/home/ftmlyc_files/projects/study/python"))
+ ("/home/ftmlyc_files/projects/study/cpp/"
+  (dired-filename . "/home/ftmlyc_files/projects/study/cpp/cpp_1.cpp"))
+ ("/" (dired-filename . "/home")) ("/home/ftmlych/file/" . 203)
+ ("/home/ftmlych/file/emacs-linux-tty/"
+  (dired-filename . "/home/ftmlych/file/emacs-linux-tty/init.el"))
+ ("/home/ftmlych/.Xresources" . 2) ("/home/ftmlych/.emacs.d/init.el" . 8125)
+ ("/home/ftmlych/.emacs.d/langs.el" . 47)
+ ("/home/ftmlych/.emacs.d/" (dired-filename . "/home/ftmlych/.emacs.d/langs.el"))
+ ("/usr/share/emacs/30.1/etc/HELLO" . 968)
+ ("/home/ftmlych/.lofter-cli/config.json" . 110)
+ ("/home/ftmlych/.config/picom/picom.conf" . 73)
+ ("/home/ftmlych/.config/qutebrowser/config.py" . 104))

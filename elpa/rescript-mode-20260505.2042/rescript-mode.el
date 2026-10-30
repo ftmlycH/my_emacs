@@ -1,0 +1,273 @@
+;;; rescript-mode.el --- A major mode for editing ReScript -*-lexical-binding: t-*-
+;; Portions Copyright (c) 2015-present, Facebook, Inc. All rights reserved.
+;; Copyright (C) 2021 John Lee <jjl@pobox.com>
+
+;; Package-Version: 20260505.2042
+;; Package-Revision: d0ff73d8e6c9
+;; Author: Karl Landstrom <karl.landstrom@brgeight.se>
+;;         Daniel Colascione <dancol@dancol.org>
+;;         John Lee <jjl@pobox.com>
+;; Maintainer: John Lee <jjl@pobox.com>
+;; Url: https://github.com/jjlee/rescript-mode
+;; Keywords: languages, rescript
+;; Package-Requires: ((emacs "26.1"))
+
+;; This file is NOT part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+;; This project provides useful functions and helpers for developing code
+;; using the ReScript programming language
+;;
+;; The indentation code comes from js.el.  The rest is based on reason-mode.el.
+;;
+;; Exported names start with "rescript-"; private names start with
+;; "rescript--".
+
+;;; Code:
+
+(eval-when-compile (require 'rx)
+                   (require 'compile)
+                   (require 'url-vars))
+
+(defgroup rescript nil
+  "Support for ReScript code."
+  :link '(url-link "https://rescript-lang.org/")
+  :group 'languages)
+
+(require 'rescript-indent)
+
+(defconst rescript--re-ident "[[:word:][:multibyte:]_][[:word:][:multibyte:]_[:digit:]]*")
+
+;; Syntax definitions and helpers
+
+(defconst rescript--regex-literal-rx
+  (rx (or line-start "=" "(" "," "[" "!" "&" "|" "?" "{" "}" ";" "~" "+"
+          "return" "case" "throw" "in" "delete" "typeof" "void"
+          ">" ":" "^" "%")
+      (* (syntax whitespace))
+      (group "/")
+      ;; Not a comment or empty regex
+      (not (any ?/ ?* ?\n))
+      ;; Regex body: non-/ chars or escaped chars
+      (* (or (seq "\\" not-newline) (not (any ?/ ?\n))))
+      (group "/"))
+  "Regexp matching ReScript regex literals.
+Captures the opening and closing `/` delimiters in groups 1 and 2.")
+
+(defun rescript--syntax-propertize (start end)
+  "Apply syntax properties to regex literals between START and END.
+Marks the `/` delimiters of regex literals with string-fence
+syntax class so that characters like `\"' inside the regex do not
+break string parsing."
+  (goto-char start)
+  (while (re-search-forward rescript--regex-literal-rx end t)
+    ;; Only apply if we're not inside a string or comment
+    (let ((state (save-excursion
+                   (save-match-data
+                     (syntax-ppss (match-beginning 1))))))
+      (unless (or (nth 3 state) (nth 4 state))
+        (put-text-property (match-beginning 1) (match-end 1)
+                           'syntax-table '(15 . ?/))
+        (put-text-property (match-beginning 2) (match-end 2)
+                           'syntax-table '(15 . ?/))))))
+
+(defvar rescript-mode-syntax-table
+  (let ((table (make-syntax-table)))
+
+    ;; Operators
+    (dolist (i '(?+ ?- ?* ?/ ?& ?| ?^ ?! ?< ?> ?~ ?@))
+      (modify-syntax-entry i "." table))
+
+    ;; Strings
+    (modify-syntax-entry ?\" "\"" table)
+    (modify-syntax-entry ?\` "\"" table)
+    (modify-syntax-entry ?\\ "\\" table)
+    (modify-syntax-entry ?\' "_"  table)
+
+    ;; Comments
+    (modify-syntax-entry ?/  ". 124b" table)
+    (modify-syntax-entry ?*  ". 23n"  table)
+    (modify-syntax-entry ?\n "> b"    table)
+    (modify-syntax-entry ?\^m "> b"   table)
+
+    table))
+
+;; in rescript-vscode grammar file, what are they?
+;; import
+;; library
+;; export
+
+;; Font-locking definitions and helpers
+(defconst rescript--keywords
+  '("and" "as" "assert" "async" "await"
+    "constraint"
+    "dict{" "else" "exception" "export" "external"
+    "false" "for"
+    "if" "import" "in" "include"
+    "lazy" "let" "list{"
+    "module" "mutable"
+    "of" "open"
+    "private"
+    "rec"
+    "switch"
+    "true" "try" "type"
+    "when" "while"))
+
+
+(defconst rescript--consts
+  '("true" "false"))
+
+(defconst rescript--special-types
+  '("int" "float" "string" "char"
+    "bool" "unit" "list" "dict" "array" "exn"
+    "option" "ref" "promise" "result"))
+
+(defconst rescript--camel-case
+  (rx symbol-start
+      (group upper (0+ (any word nonascii digit "_")))
+      symbol-end))
+
+(eval-and-compile
+  (defconst rescript--char-literal-rx
+    (rx (seq (group "'")
+             (or (seq "\\" anything)
+                 (not (any "'\\")))
+             (group "'")))))
+
+(defun rescript--re-grab (inner)
+  "Build a grab regexp given INNER."
+  (concat "\\(" inner "\\)"))
+
+;;; Syntax highlighting for Rescript
+(defvar rescript--font-lock-keywords
+  `((,(regexp-opt rescript--keywords 'symbols) . font-lock-keyword-face)
+    (,(regexp-opt rescript--special-types 'symbols) . font-lock-builtin-face)
+    (,(regexp-opt rescript--consts 'symbols) . font-lock-constant-face)
+
+    (,rescript--camel-case 1 font-lock-type-face)
+
+    ;; Field names like `foo:`, highlight excluding the :
+    (,(concat (rescript--re-grab rescript--re-ident) ":[^:]") 1 font-lock-variable-name-face)
+    ;; Module names like `foo::`, highlight including the ::
+    (,(rescript--re-grab (concat rescript--re-ident "::")) 1 font-lock-type-face)
+    ;; Name punned labeled args like ::foo
+    (,(concat "[[:space:]]+" (rescript--re-grab (concat "::" rescript--re-ident))) 1 font-lock-type-face)
+
+    ;; TODO jsx attribs?
+    (,
+     (concat "<[/]?" (rescript--re-grab rescript--re-ident) "[^>]*" ">")
+     1 font-lock-type-face)))
+
+(defvar rescript-mode-map
+  (let ((map (make-sparse-keymap)))
+    ;; (define-key map "\C-c\C-a" #'rescript-mode-find-alternate-file)
+    map))
+
+;;;###autoload
+(define-derived-mode rescript-mode prog-mode "ReScript"
+  "Major mode for ReScript code.
+
+\\{rescript-mode-map}"
+  :keymap rescript-mode-map
+
+  ;; Indentation
+  (setq-local indent-line-function #'rescript-indent-line)
+  (setq-local comment-start "/* ")
+  (setq-local comment-end   " */")
+  (setq-local indent-tabs-mode nil)
+  ;; Allow paragraph fills for comments
+  (setq-local comment-start-skip "/\\*+[ \t]*")
+  (setq-local paragraph-start
+              (concat "^[ \t]*$\\|\\*)$\\|" page-delimiter))
+  (setq-local paragraph-separate paragraph-start)
+  (setq-local require-final-newline t)
+  (setq-local normal-auto-fill-function nil)
+  (setq-local comment-multi-line t)
+  (setq-local comment-start "// ")
+  (setq-local comment-start-skip "\\(//+\\|/\\*+\\)\\s *")
+  (setq-local comment-end "")
+  ;; Fonts
+  (setq-local font-lock-defaults '(rescript--font-lock-keywords))
+  ;; Regex literals: mark / delimiters as string fences so that
+  ;; quotes inside regexes don't break syntax parsing.
+  (setq-local syntax-propertize-function #'rescript--syntax-propertize))
+
+
+;;; Compilation Error Regexs
+;;;###autoload
+(eval-and-compile
+  (defconst rescript--compilation-error-rx
+    (rx-to-string
+      '(seq
+         (or
+           "We've found a bug for you!"
+           "Syntax error!"
+           (seq
+             "Warning number"
+             (* space)
+             (+ digit)
+             (* space)
+             "(configured as error)"))
+         (* (or space control))
+         line-start
+         (* space)
+         (group (group (seq (* any) (or ".res" ".resi")))
+           ":"
+           (group (+ digit))
+           ":"
+           (group (+ digit))
+           (? "-" (+ digit) (? ":" (+ digit))))
+         line-end)))
+
+
+  (defconst rescript--compilation-warning-rx
+    (rx-to-string
+    '(seq
+       "Warning number"
+       (+ space)
+       (+ digit)
+       (* (or space control))
+       line-start
+       (* space)
+       (group (group (seq (* any) (or ".res" ".resi")))
+         ":"
+         (group (+ digit))
+         ":"
+         (group (+ digit))
+         (? "-" (+ digit) (? ":" (+ digit))))
+       line-end))))
+
+
+;;;###autoload
+(with-eval-after-load 'compile
+  (add-to-list 'compilation-error-regexp-alist 'rescript-error)
+  (add-to-list 'compilation-error-regexp-alist 'rescript-warning)
+
+  (add-to-list
+    'compilation-error-regexp-alist-alist
+    (cons 'rescript-error (cons rescript--compilation-error-rx '(2 3 4 2 1))))
+
+  (add-to-list
+    'compilation-error-regexp-alist-alist
+    (cons 'rescript-warning (cons rescript--compilation-warning-rx '(2 3 4 1 1)))))
+
+
+
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.resi?\\'" . rescript-mode))
+
+(provide 'rescript-mode)
+;;; rescript-mode.el ends here

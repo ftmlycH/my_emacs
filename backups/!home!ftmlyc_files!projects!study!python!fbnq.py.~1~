@@ -1,0 +1,6 @@
+def fbnq(n):
+    if n <= 2:
+        return 1
+    return fbnq(n-1) + fbnq(n-2)
+a = fbnq(int(input()))
+print(a)

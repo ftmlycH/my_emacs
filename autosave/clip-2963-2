@@ -1,0 +1,1 @@
+exec xrdb -merge ~/.Xresources
