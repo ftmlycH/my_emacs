@@ -1,0 +1,26 @@
+# --- Emacs 运行时状态，不入库 ---
+autosave/
+backups/
+auto-save-list/
+history
+recentf
+recentf.eld
+places
+places.eld
+last-file
+editor-mode
+server/
+transient/
+eln-cache/
+tree-sitter/
+custom.el
+
+# --- 包目录与大文件，由 install-packages.el 重建 ---
+elpa/
+package-quickstart.el
+package-quickstart.elc
+
+# --- 本地快照与对比目录 ---
+_backup_pre_*/
+_linux_cmp/
+_myemacs_cmp/
